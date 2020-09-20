@@ -11,6 +11,7 @@ import org.jooq.Record;
 import org.jooq.Result;
 import org.jooq.SQLDialect;
 import org.jooq.impl.DSL;
+import org.modelmapper.AbstractConverter;
 import org.modelmapper.ModelMapper;
 import org.modelmapper.PropertyMap;
 import org.modelmapper.convention.NameTokenizers;
@@ -28,7 +29,7 @@ public class RecordValueReaderTest {
   protected void beforeClass() throws Exception {
     Class.forName("org.h2.Driver");
     ctx = DSL.using(DriverManager.getConnection("jdbc:h2:mem:test"), SQLDialect.H2);
-    ctx.execute("CREATE TABLE orders (id int(11), customer_id int(11), customer_street_address varchar(25), customer_address_city varchar(25), customer_address_zip varchar(10))");
+    ctx.execute("CREATE TABLE orders (id int(11), customer_id int(11), customer_type int(1), customer_street_address varchar(25), customer_address_city varchar(25), customer_address_zip varchar(10))");
   }
 
   public static class Order {
@@ -42,10 +43,33 @@ public class RecordValueReaderTest {
 
   public static class Customer {
     public int id;
+    public CustomerType type;
     public Address address;
 
     public Address getAddress() {
       return address;
+    }
+  }
+
+  public static enum CustomerType {
+    PERSONAL(1),
+    ORGANIZATION(2);
+
+    private final int code;
+
+    private CustomerType(int code) {
+      this.code = code;
+    }
+
+    public int getCode() {
+      return this.code;
+    }
+
+    public static CustomerType codeOf(int code) {
+      for (CustomerType type : values()) {
+        if (type.code == code) return type;
+      }
+      return null;
     }
   }
 
@@ -59,6 +83,13 @@ public class RecordValueReaderTest {
     }
   }
 
+  public static class CustomerTypeConverter extends AbstractConverter<Integer, CustomerType> {
+    @Override
+    protected CustomerType convert(Integer source) {
+      return CustomerType.codeOf(source);
+    }
+  }
+
   @BeforeMethod
   protected void beforeMethod() {
     modelMapper = new ModelMapper();
@@ -66,6 +97,7 @@ public class RecordValueReaderTest {
         .setFieldMatchingEnabled(true)
         .setSourceNameTokenizer(NameTokenizers.UNDERSCORE)
         .addValueReader(new RecordValueReader());
+    modelMapper.addConverter(new CustomerTypeConverter());
   }
 
   @AfterMethod
@@ -74,7 +106,7 @@ public class RecordValueReaderTest {
   }
 
   public void shouldMapFromRecord() throws Exception {
-    ctx.execute("INSERT INTO orders values (456, 789, '123 Main Street', 'SF', null)");
+    ctx.execute("INSERT INTO orders values (456, 789, 1, '123 Main Street', 'SF', null)");
 
     Record record = ctx.fetch("select * from orders").get(0);
 
@@ -82,6 +114,7 @@ public class RecordValueReaderTest {
 
     assertEquals(order.id, 456);
     assertEquals(order.customer.id, 789);
+    assertEquals(order.customer.type, CustomerType.PERSONAL);
     assertEquals(order.customer.address.street, "123 Main Street");
     assertEquals(order.customer.address.city, "SF");
     assertEquals(order.customer.address.zip, null);
@@ -91,7 +124,7 @@ public class RecordValueReaderTest {
   }
 
   public void shouldMapWithExplicitMapping() throws Exception {
-    ctx.execute("INSERT INTO orders values (456, 789, '123 Main Street', 'SF', null)");
+    ctx.execute("INSERT INTO orders values (456, 789, 2, '123 Main Street', 'SF', null)");
 
     Record record = ctx.fetch("select * from orders").get(0);
 
@@ -106,6 +139,7 @@ public class RecordValueReaderTest {
 
     assertEquals(order.id, 456);
     assertEquals(order.customer.id, 789);
+    assertEquals(order.customer.type, CustomerType.ORGANIZATION);
     assertEquals(order.customer.address.street, "123 Main Street");
     assertEquals(order.customer.address.city, "SF");
     assertEquals(order.customer.address.zip, null);
@@ -115,8 +149,8 @@ public class RecordValueReaderTest {
   }
 
   public void shouldMapNullWell() throws Exception {
-    ctx.execute("INSERT INTO orders values (1, null, null, null, null)");
-    ctx.execute("INSERT INTO orders values (2, 789, '123 Main Street', 'SF', null)");
+    ctx.execute("INSERT INTO orders values (1, null, null, null, null, null)");
+    ctx.execute("INSERT INTO orders values (2, 789, 1, '123 Main Street', 'SF', null)");
 
     Result<Record> records = ctx.fetch("select * from orders order by id");
 
@@ -130,6 +164,7 @@ public class RecordValueReaderTest {
 
     assertEquals(order.id, 2);
     assertEquals(order.customer.id, 789);
+    assertEquals(order.customer.type, CustomerType.PERSONAL);
     assertEquals(order.customer.address.street, "123 Main Street");
     assertEquals(order.customer.address.city, "SF");
     assertEquals(order.customer.address.zip, null);
